@@ -1,0 +1,255 @@
+library(DESeq2)
+library(tidyverse)
+counts <- read.csv("counts.csv", header = TRUE, stringsAsFactors = FALSE, row.names = 1)
+head(counts)
+# Example based on your screenshot
+sample_info <- data.frame(
+  sample = colnames(counts),
+  group = c(
+    rep("SC", 2),  # SC1 SC2
+    rep("ST", 3),  # ST1 ST2 ST3
+    rep("RC", 3),  # RC1 RC2 RC3
+    rep("RT", 3)   # RT1 RT2 RT3
+  )
+)
+rownames(sample_info) <- sample_info$sample
+sample_info
+dds <- DESeqDataSetFromMatrix(
+  countData = counts,
+  colData = sample_info,
+  design = ~ group  # basic design for comparing groups
+)
+dds <- dds[rowSums(counts(dds)) > 10, ]
+dds <- DESeq(dds)
+res_RT_vs_ST <- results(dds, contrast = c("group", "RT", "ST"))
+res_RT_vs_ST <- res_RT_vs_ST[order(res_RT_vs_ST$padj), ]
+deg_RT_vs_ST <- res_RT_vs_ST[
+  which(res_RT_vs_ST$padj < 0.05 & abs(res_RT_vs_ST$log2FoldChange) > 1),
+]
+head(deg_RT_vs_ST)
+
+# All genes
+write.csv(
+  as.data.frame(res_RT_vs_ST),
+  "DEG_RT_vs_ST_all.csv"
+)
+
+# Significant DEGs only
+write.csv(
+  as.data.frame(deg_RT_vs_ST),
+  "DEG_RT_vs_ST_significant.csv"
+)
+plotMA(res_RT_vs_ST, ylim = c(-5, 5))
+
+library(ggplot2)
+
+res_df <- as.data.frame(res_RT_vs_ST)
+
+ggplot(res_df, aes(x = log2FoldChange, y = -log10(padj))) +
+  geom_point(alpha = 0.5) +
+  theme_minimal() +
+  xlab("Log2 Fold Change (RT vs ST)") +
+  ylab("-log10 FDR") +
+  geom_vline(xintercept = c(-1, 1), color = "red", linetype = "dashed") +
+  geom_hline(yintercept = -log10(0.05), color = "blue", linetype = "dashed")
+
+
+library(tidyverse)
+
+deg_RT_vs_ST <- read.csv("DEG_RT_vs_ST_significant.csv", row.names = 1)
+
+head(deg_RT_vs_ST)
+
+deg_RT_vs_ST <- deg_RT_vs_ST %>%
+  mutate(
+    regulation = ifelse(
+      log2FoldChange > 1, "Up", "Down"
+    )
+  )
+
+table(deg_RT_vs_ST$regulation)
+
+write.csv(
+  deg_RT_vs_ST,
+  "DEG_RT_vs_ST_significant_with_direction.csv"
+)
+ggplot(deg_RT_vs_ST,
+       aes(x = log2FoldChange, y = -log10(padj), color = regulation)) +
+  geom_point(size = 2) +
+  scale_color_manual(values = c("Up" = "red", "Down" = "blue")) +
+  theme_minimal(base_size = 14) +
+  xlab("Log2 Fold Change (RT vs ST)") +
+  ylab("-log10 FDR")
+
+library(ggrepel)
+
+top_genes <- deg_RT_vs_ST %>%
+  arrange(padj) %>%
+  dplyr::slice(1:10)
+
+
+ggplot(deg_RT_vs_ST,
+       aes(x = log2FoldChange, y = -log10(padj), color = regulation)) +
+  geom_point(size = 2) +
+  geom_text_repel(data = top_genes,
+                  aes(label = rownames(top_genes)),
+                  size = 3) +
+  scale_color_manual(values = c("Up" = "red", "Down" = "blue")) +
+  theme_minimal()
+
+HighConfidence_Blue_Resistance
+
+# Example: load your blue module high-confidence genes
+blue_genes <- read.csv("HighConfidence_Blue_Resistance.csv", header = TRUE, stringsAsFactors = FALSE)
+blue_genes <- blue_genes$Gene  # adjust column name if needed
+
+# Load significant DEGs
+deg_RT_vs_ST <- read.csv("DEG_RT_vs_ST_significant_with_direction.csv", row.names = 1)
+deg_genes <- rownames(deg_RT_vs_ST)
+
+
+
+overlap_genes <- base::intersect(blue_genes, deg_genes)
+length(overlap_genes)
+overlap_genes
+
+overlap_deg <- deg_RT_vs_ST[overlap_genes, ]  # subset DEGs
+
+up_overlap <- rownames(overlap_deg[overlap_deg$regulation == "Up", ])
+down_overlap <- rownames(overlap_deg[overlap_deg$regulation == "Down", ])
+
+length(up_overlap)
+length(down_overlap)
+
+
+write.csv(overlap_genes, "blue_module_DEG_overlap_genes.csv", row.names = FALSE)
+write.csv(overlap_deg, "blue_module_DEG_overlap_full_info.csv")
+
+
+# Assuming you have TOM for blue module
+TOM_blue <- TOM[blue_genes, blue_genes]
+
+# Keep only overlapping genes
+TOM_overlap <- TOM_blue[overlap_genes, overlap_genes]
+
+# Set threshold for visualization
+TOM_overlap[TOM_overlap < 0.2] <- 0  # adjust as needed
+
+library(reshape2)
+edges_overlap <- melt(TOM_overlap)
+edges_overlap <- edges_overlap[edges_overlap$value > 0, ]
+
+# Export
+write.csv(edges_overlap, "blue_module_DEG_overlap_edges.csv", row.names = FALSE)
+write.csv(overlap_genes, "blue_module_DEG_overlap_nodes.csv", row.names = FALSE)
+
+
+
+# Clean gene names to avoid mismatch issues
+blue_genes_clean <- toupper(trimws(blue_genes))
+deg_genes_clean <- toupper(trimws(deg_genes))
+
+library(VennDiagram)
+library(grid)
+
+venn.plot <- venn.diagram(
+  x = list(
+    Blue_Module = blue_genes_clean,
+    Significant_DEGs = deg_genes_clean
+  ),
+  filename = NULL,         # NULL means draw to R device
+  fill = c("blue", "red"),
+  alpha = 0.5,
+  cex = 1.5,
+  cat.cex = 1.2,
+  cat.pos = 0,
+  cat.dist = 0.05
+)
+
+# Draw it
+grid.newpage()
+grid.draw(venn.plot)
+
+
+
+# -----------------------------
+# 1️⃣ Load turquoise module high-confidence genes
+# -----------------------------
+turquoise_genes <- read.csv("HighConfidence_Turquoise_Resistance.csv", 
+                            header = TRUE, stringsAsFactors = FALSE)
+turquoise_genes <- turquoise_genes$Gene  # adjust column name if needed
+
+# -----------------------------
+# 2️⃣ Load significant DEGs
+# -----------------------------
+deg_RT_vs_ST <- read.csv("DEG_RT_vs_ST_significant_with_direction.csv", row.names = 1)
+deg_genes <- rownames(deg_RT_vs_ST)
+
+# -----------------------------
+# 3️⃣ Find overlap
+# -----------------------------
+overlap_genes_turquoise <- base::intersect(turquoise_genes, deg_genes)
+length(overlap_genes_turquoise)
+overlap_genes_turquoise
+
+# Subset DEG info
+overlap_deg_turquoise <- deg_RT_vs_ST[overlap_genes_turquoise, ]
+
+# Separate up/down DEGs
+up_overlap_turquoise <- rownames(overlap_deg_turquoise[overlap_deg_turquoise$regulation == "Up", ])
+down_overlap_turquoise <- rownames(overlap_deg_turquoise[overlap_deg_turquoise$regulation == "Down", ])
+
+length(up_overlap_turquoise)
+length(down_overlap_turquoise)
+
+# Export overlap genes
+write.csv(overlap_genes_turquoise, "turquoise_module_DEG_overlap_genes.csv", row.names = FALSE)
+write.csv(overlap_deg_turquoise, "turquoise_module_DEG_overlap_full_info.csv")
+
+# -----------------------------
+# 4️⃣ Prepare TOM for Cytoscape (if you have TOM for turquoise module)
+# -----------------------------
+# Assuming TOM for turquoise module exists as TOM_turquoise
+TOM_turquoise <- TOM[turquoise_genes, turquoise_genes]
+
+# Keep only overlapping genes
+TOM_overlap_turquoise <- TOM_turquoise[overlap_genes_turquoise, overlap_genes_turquoise]
+
+# Set threshold for visualization
+TOM_overlap_turquoise[TOM_overlap_turquoise < 0.2] <- 0  # adjust as needed
+
+library(reshape2)
+edges_overlap_turquoise <- melt(TOM_overlap_turquoise)
+edges_overlap_turquoise <- edges_overlap_turquoise[edges_overlap_turquoise$value > 0, ]
+
+# Export edges & nodes for Cytoscape
+write.csv(edges_overlap_turquoise, "turquoise_module_DEG_overlap_edges.csv", row.names = FALSE)
+write.csv(overlap_genes_turquoise, "turquoise_module_DEG_overlap_nodes.csv", row.names = FALSE)
+
+# -----------------------------
+# 5️⃣ Draw Venn diagram for turquoise module
+# -----------------------------
+# Clean gene names
+turquoise_genes_clean <- toupper(trimws(turquoise_genes))
+deg_genes_clean <- toupper(trimws(deg_genes))
+
+library(VennDiagram)
+library(grid)
+
+venn.plot_turquoise <- venn.diagram(
+  x = list(
+    Turquoise_Module = turquoise_genes_clean,
+    Significant_DEGs = deg_genes_clean
+  ),
+  filename = NULL,         # NULL means draw to R device
+  fill = c("turquoise", "red"),
+  alpha = 0.5,
+  cex = 1.5,
+  cat.cex = 1.2,
+  cat.pos = 0,
+  cat.dist = 0.05
+)
+
+# Draw it
+grid.newpage()
+grid.draw(venn.plot_turquoise)
